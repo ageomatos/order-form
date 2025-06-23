@@ -27,7 +27,7 @@
         .scrollable-content::-webkit-scrollbar-thumb:hover {
             background: #6b7280; /* bg-gray-500 */
         }
-        /* Modal Overlays (Quantity, Message) */
+        /* Modal Overlays (Quantity, Message, Request Access) */
         .modal-overlay {
             position: fixed;
             top: 0;
@@ -61,6 +61,14 @@
         .modal-overlay.active .modal-content {
             transform: scale(1);
         }
+        /* Specific for larger request access modal */
+        #requestAccessModal .modal-content {
+            max-width: 600px;
+            text-align: left; /* Align text left within this modal */
+        }
+        #requestAccessModal .modal-content h3, #requestAccessModal .modal-content .flex.justify-center {
+            text-align: center; /* Center title and buttons within this modal */
+        }
     </style>
     <!-- Firebase CDN (Make sure to use the latest compatible versions) -->
     <script type="module">
@@ -77,12 +85,24 @@
         // Expose documentId for global use in custom functions if needed (e.g., duplicateOrderToCart)
         window.documentId = documentId;
 
-        // Firebase configuration (provided by Canvas environment)
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'; // Use default if not provided
+        // --- IMPORTANT: REPLACE WITH YOUR ACTUAL FIREBASE CONFIGURATION ---
+        // Get this from your Firebase Project Settings -> Your apps -> Web app setup
+        const firebaseConfig = {
+            apiKey: "YOUR_API_KEY_HERE", // Replace with your actual API Key
+            authDomain: "your-project-id.firebaseapp.com", // Replace with your actual Auth Domain
+            projectId: "your-project-id", // Replace with your actual Project ID
+            storageBucket: "your-project-id.appspot.com", // Replace with your actual Storage Bucket
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID_HERE", // Replace with your actual Messaging Sender ID
+            appId: "YOUR_APP_ID_HERE" // Replace with your actual App ID
+        };
+        // --- END IMPORTANT SECTION ---
+
+        // The appId used for Firestore collection paths. This should match the 'appId' from your firebaseConfig.
+        const firestoreAppId = firebaseConfig.appId; 
+
 
         // Initialize Firebase
-        if (Object.keys(firebaseConfig).length > 0) {
+        if (Object.keys(firebaseConfig).length > 0 && firebaseConfig.apiKey !== "YOUR_API_KEY") { // Check if config is actually set
             window.firebaseApp = initializeApp(firebaseConfig);
             window.firebaseAuth = getAuth(window.firebaseApp);
             window.firebaseDb = getFirestore(window.firebaseApp);
@@ -92,78 +112,101 @@
                 if (user) {
                     window.currentFirebaseUserId = user.uid;
                     console.log("Firebase user signed in:", user.uid);
-                    // No need to update UI here, login handlers will do it
                 } else {
                     window.currentFirebaseUserId = null;
                     console.log("Firebase user signed out or not authenticated anonymously.");
                 }
             });
 
-            // Sign in anonymously on load if not already signed in
-            if (!window.firebaseAuth.currentUser) {
-                 signInAnonymously(window.firebaseAuth)
-                    .then(() => console.log("Signed in anonymously."))
-                    .catch((error) => console.error("Anonymous sign-in error:", error));
-            }
         } else {
-            console.warn("Firebase configuration not found. Firestore operations will not work.");
+            console.error("Firebase configuration is missing or incomplete. Firestore operations will not work.");
+            // Display an error message to the user if Firebase is not configured
+            document.addEventListener('DOMContentLoaded', () => {
+                const mainElement = document.querySelector('main');
+                if (mainElement) {
+                    mainElement.innerHTML = `
+                        <div class="text-center p-8 bg-red-100 border border-red-400 text-red-700 rounded-lg max-w-md mx-auto mt-10">
+                            <h2 class="text-2xl font-bold mb-4">Firebase Not Configured!</h2>
+                            <p class="mb-4">Please replace the placeholder Firebase configuration in the HTML file's script tag with your actual Firebase project details to enable data persistence.</p>
+                            <p class="text-sm">Refer to the instructions provided by the AI model for how to get your Firebase config.</p>
+                        </div>
+                    `;
+                }
+            });
         }
 
         // Expose Firestore collections for easier access
-        window.getProductsCollection = () => collection(window.firebaseDb, `artifacts/${appId}/public/data/products`);
-        window.getCustomersCollection = () => collection(window.firebaseDb, `artifacts/${appId}/public/data/customers`);
+        // Use the hardcoded firestoreAppId
+        window.getProductsCollection = () => collection(window.firebaseDb, `artifacts/${firestoreAppId}/public/data/products`);
+        window.getCustomersCollection = () => collection(window.firebaseDb, `artifacts/${firestoreAppId}/public/data/customers`);
         // Orders collection path changes based on customerCode
-        window.getOrdersCollection = (customerCode) => collection(window.firebaseDb, `artifacts/${appId}/public/data/orders/${customerCode}/customerOrders`);
+        window.getOrdersCollection = (customerCode) => collection(window.firebaseDb, `artifacts/${firestoreAppId}/public/data/orders/${customerCode}/customerOrders`);
 
-        // Seed initial products if the collection is empty
+        // Seed initial products and test customer if collections are empty
         window.seedInitialData = async () => {
             if (!window.firebaseDb) {
                 console.error("Firestore not initialized for seeding.");
                 return;
             }
 
-            const productsRef = window.getProductsCollection();
-            const productDocs = await getDocs(productsRef);
-
-            if (productDocs.empty) {
-                console.log("Seeding initial product data...");
-                const initialProducts = [
-                    { id: 'p1', name: 'Premium Coffee Beans', description: 'Rich, aromatic, ethically sourced coffee beans.', price: 12.99, sku: 'CB001', category: 'Tea', tiHi: '10x10', caseWeight: 20, containerType: 'Bag' },
-                    { id: 'p2', name: 'Organic Green Tea', description: 'Delicate and refreshing green tea, 20 tea bags.', price: 8.50, sku: 'GT002', category: 'Tea', tiHi: '8x8', caseWeight: 5, containerType: 'Tetra' },
-                    { id: 'p3', name: 'Artisan Dark Chocolate', description: '70% cocoa dark chocolate bar, 100g.', price: 5.75, sku: 'DC003', category: 'Other', tiHi: '12x12', caseWeight: 10, containerType: 'Other' },
-                    { id: 'p4', name: 'Gourmet Honey (Wildflower)', description: 'Pure wildflower honey, 500g jar.', price: 9.20, sku: 'HO004', category: 'Syrups', tiHi: '6x6', caseWeight: 15, containerType: 'Glass' },
-                    { id: 'p5', name: 'Maple Syrup (Grade A)', description: 'Pure Grade A maple syrup, 250ml bottle.', price: 15.00, sku: 'MS005', category: 'Syrups', tiHi: '7x7', caseWeight: 18, containerType: 'Glass' },
-                    { id: 'p6', name: 'Spiced Chai Mix', description: 'Instant chai latte mix, just add milk.', price: 7.99, sku: 'CM006', category: 'Tea', tiHi: '9x9', caseWeight: 7, containerType: 'Bag' },
-                    { id: 'p7', name: 'Assorted Herbal Infusions', description: 'Selection of calming herbal teas, 15 bags.', price: 6.50, sku: 'HI007', category: 'Tea', tiHi: '5x5', caseWeight: 3, containerType: 'Tetra' },
-                    { id: 'p8', name: 'Espresso Machine Cleaner', description: 'Eco-friendly descaling solution for espresso machines.', price: 10.99, sku: 'EMC008', category: 'Other', tiHi: '10x8', caseWeight: 12, containerType: 'PET' },
-                    { id: 'p9', name: 'Strawberry Puree', description: 'Sweet strawberry puree, ideal for desserts and drinks.', price: 7.00, sku: 'PU001', category: 'Purees', tiHi: '8x6', caseWeight: 25, containerType: 'PET' },
-                    { id: 'p10', name: 'Almond Milk (Unsweetened)', description: 'Dairy-free unsweetened almond milk.', price: 4.50, sku: 'AM001', category: 'Alternative to Milk', tiHi: '4x4', caseWeight: 30, containerType: 'Tetra' },
-                    { id: 'p11', name: 'Vanilla Syrup', description: 'Classic vanilla flavored syrup for coffee and cocktails.', price: 9.99, sku: 'SYR001', category: 'Syrups', tiHi: '7x9', caseWeight: 17, containerType: 'Glass' },
-                    { id: 'p12', name: 'Tropical Fruit Smoothie Base', description: 'Concentrated mix for delicious tropical smoothies.', price: 11.25, sku: 'SMO001', category: 'Smoothies', tiHi: '10x7', caseWeight: 22, containerType: 'PET' },
-                ];
-                for (const product of initialProducts) {
-                    await setDoc(doc(productsRef, product.id), product);
+            // Ensure anonymous sign-in is complete before seeding data.
+            // This ensures `request.auth` is not null for initial Firestore operations.
+            if (!window.firebaseAuth.currentUser) {
+                try {
+                    await signInAnonymously(window.firebaseAuth);
+                    console.log("Anonymous sign-in confirmed before seeding operations.");
+                } catch (error) {
+                    console.error("Failed to sign in anonymously during seeding:", error);
+                    // Continue without seeding if auth fails, show message later
                 }
-                console.log("Product seeding complete.");
-            } else {
-                console.log("Products already exist, skipping seeding.");
             }
+            
+            // Proceed only if we have an authenticated user (even anonymous)
+            if (window.firebaseAuth.currentUser) {
+                const productsRef = window.getProductsCollection();
+                const productDocs = await getDocs(productsRef);
 
-            const customersRef = window.getCustomersCollection();
-            const customerDocs = await getDocs(customersRef);
+                if (productDocs.empty) {
+                    console.log("Seeding initial product data...");
+                    const initialProducts = [
+                        { id: 'p1', name: 'Premium Coffee Beans', description: 'Rich, aromatic, ethically sourced coffee beans.', price: 12.99, sku: 'CB001', category: 'Tea', tiHi: '10x10', caseWeight: 20, containerType: 'Bag' },
+                        { id: 'p2', name: 'Organic Green Tea', description: 'Delicate and refreshing green tea, 20 tea bags.', price: 8.50, sku: 'GT002', category: 'Tea', tiHi: '8x8', caseWeight: 5, containerType: 'Tetra' },
+                        { id: 'p3', name: 'Artisan Dark Chocolate', description: '70% cocoa dark chocolate bar, 100g.', price: 5.75, sku: 'DC003', category: 'Other', tiHi: '12x12', caseWeight: 10, containerType: 'Other' },
+                        { id: 'p4', name: 'Gourmet Honey (Wildflower)', description: 'Pure wildflower honey, 500g jar.', price: 9.20, sku: 'HO004', category: 'Syrups', tiHi: '6x6', caseWeight: 15, containerType: 'Glass' },
+                        { id: 'p5', name: 'Maple Syrup (Grade A)', description: 'Pure Grade A maple syrup, 250ml bottle.', price: 15.00, sku: 'MS005', category: 'Syrups', tiHi: '7x7', caseWeight: 18, containerType: 'Glass' },
+                        { id: 'p6', name: 'Spiced Chai Mix', description: 'Instant chai latte mix, just add milk.', price: 7.99, sku: 'CM006', category: 'Tea', tiHi: '9x9', caseWeight: 7, containerType: 'Bag' },
+                        { id: 'p7', name: 'Assorted Herbal Infusions', description: 'Selection of calming herbal teas, 15 bags.', price: 6.50, sku: 'HI007', category: 'Tea', tiHi: '5x5', caseWeight: 3, containerType: 'Tetra' },
+                        { id: 'p8', name: 'Espresso Machine Cleaner', description: 'Eco-friendly descaling solution for espresso machines.', price: 10.99, sku: 'EMC008', category: 'Other', tiHi: '10x8', caseWeight: 12, containerType: 'PET' },
+                        { id: 'p9', name: 'Strawberry Puree', description: 'Sweet strawberry puree, ideal for desserts and drinks.', price: 7.00, sku: 'PU001', category: 'Purees', tiHi: '8x6', caseWeight: 25, containerType: 'PET' },
+                        { id: 'p10', name: 'Almond Milk (Unsweetened)', description: 'Dairy-free unsweetened almond milk.', price: 4.50, sku: 'AM001', category: 'Alternative to Milk', tiHi: '4x4', caseWeight: 30, containerType: 'Tetra' },
+                        { id: 'p11', name: 'Vanilla Syrup', description: 'Classic vanilla flavored syrup for coffee and cocktails.', price: 9.99, sku: 'SYR001', category: 'Syrups', tiHi: '7x9', caseWeight: 17, containerType: 'Glass' },
+                        { id: 'p12', name: 'Tropical Fruit Smoothie Base', description: 'Concentrated mix for delicious tropical smoothies.', price: 11.25, sku: 'SMO001', category: 'Smoothies', tiHi: '10x7', caseWeight: 22, containerType: 'PET' },
+                    ];
+                    for (const product of initialProducts) {
+                        await setDoc(doc(productsRef, product.id), product);
+                    }
+                    console.log("Product seeding complete.");
+                } else {
+                    console.log("Products already exist, skipping seeding.");
+                }
 
-            if (customerDocs.empty) {
-                console.log("Seeding initial test customer...");
-                await addDoc(customersRef, {
-                    name: "Test Customer",
-                    customerCode: "140480",
-                    password: "140480" // IMPORTANT: In production, HASH this password securely!
-                });
-                console.log("Test customer seeded.");
+                const customersRef = window.getCustomersCollection();
+                const customerDocs = await getDocs(customersRef);
+
+                if (customerDocs.empty) {
+                    console.log("Seeding initial test customer...");
+                    await addDoc(customersRef, {
+                        name: "Test Customer",
+                        customerCode: "140480",
+                        password: "140480" // IMPORTANT: In production, HASH this password securely!
+                    });
+                    console.log("Test customer seeded.");
+                } else {
+                    console.log("Customers already exist, skipping seeding.");
+                }
             } else {
-                console.log("Customers already exist, skipping seeding.");
+                console.warn("Skipping data seeding because Firebase authentication is not active.");
             }
-
             window.loadProductsFromFirestore(); // Load products after all seeding checks
         };
     </script>
@@ -204,6 +247,7 @@
                 </div>
                 <button id="customerLoginButton" class="w-full bg-blue-500 text-white py-3 px-6 rounded-lg shadow-md hover:bg-blue-600 transition duration-300 font-semibold">Login</button>
                 <p id="customerLoginMessage" class="text-red-500 text-sm mt-3 hidden"></p>
+                <button id="requestAccessLink" class="mt-4 text-blue-600 hover:underline text-sm font-medium">Request Access</button>
             </div>
         </section>
 
@@ -381,6 +425,54 @@
             </div>
         </div>
 
+        <!-- Request Access Modal -->
+        <div id="requestAccessModal" class="modal-overlay">
+            <div class="modal-content">
+                <h3 class="text-2xl font-semibold text-gray-800 mb-6">Request Customer Access</h3>
+                <form id="requestAccessForm" class="space-y-4">
+                    <div>
+                        <label for="reqCustomerName" class="block text-gray-700 text-sm font-bold mb-2">Your Name:</label>
+                        <input type="text" id="reqCustomerName" required class="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label for="reqContactName" class="block text-gray-700 text-sm font-bold mb-2">Contact Person (if different):</label>
+                        <input type="text" id="reqContactName" class="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label for="reqPhone" class="block text-gray-700 text-sm font-bold mb-2">Phone:</label>
+                        <input type="tel" id="reqPhone" required class="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label for="reqEmail" class="block text-gray-700 text-sm font-bold mb-2">Email:</label>
+                        <input type="email" id="reqEmail" required class="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+
+                    <div class="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                        <h4 class="text-lg font-semibold text-gray-800 mb-3">Delivery Addresses</h4>
+                        <div class="flex items-center mb-3">
+                            <input type="checkbox" id="reqPickupOption" class="form-checkbox h-5 w-5 text-blue-600 rounded">
+                            <label for="reqPickupOption" class="ml-2 text-gray-700 font-medium">I prefer Pickup</label>
+                        </div>
+                        
+                        <div id="deliveryAddressesContainer" class="space-y-3 mb-4">
+                            <!-- Dynamically added addresses here -->
+                        </div>
+                        
+                        <label for="newDeliveryAddress" class="block text-gray-700 text-sm font-bold mb-2">Add New Address:</label>
+                        <textarea id="newDeliveryAddress" rows="2" class="shadow appearance-none border rounded-lg w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 mb-2" placeholder="Street, City, State, Zip Code"></textarea>
+                        <button type="button" id="addAddressBtn" class="w-full bg-indigo-500 text-white py-2 px-4 rounded-lg shadow-md hover:bg-indigo-600 transition duration-300 font-semibold text-sm">Add Address</button>
+                        <p id="addressError" class="text-red-500 text-sm mt-2 hidden"></p>
+                    </div>
+                    
+                    <p id="requestAccessMessage" class="text-red-500 text-sm mt-3 hidden"></p>
+                    <div class="flex justify-center space-x-4 mt-6">
+                        <button type="submit" class="flex-1 bg-green-500 text-white py-3 px-6 rounded-lg shadow-md hover:bg-green-600 transition duration-300 font-semibold">Submit Request</button>
+                        <button type="button" id="cancelRequestAccessBtn" class="flex-1 bg-gray-500 text-white py-3 px-6 rounded-lg shadow-md hover:bg-gray-600 transition duration-300 font-semibold">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
     </main>
 
     <footer class="bg-gray-800 text-white p-4 mt-8 shadow-inner">
@@ -391,18 +483,21 @@
 
     <script type="module">
         // Import Firestore functions exposed globally by the first script tag
-        // documentId is now explicitly imported from firebase/firestore
         const { getAuth, signInAnonymously, onAuthStateChanged, signOut } = window.firebaseAuth;
         const { getFirestore, collection, getDocs, addDoc, setDoc, doc, query, where, serverTimestamp, documentId } = window.firebaseDb;
-        const { getProductsCollection, getCustomersCollection, getOrdersCollection, seedInitialData } = window; // Changed to seedInitialData
+        const { getProductsCollection, getCustomersCollection, getOrdersCollection, seedInitialData } = window; 
 
-        let products = []; // All products from Firestore
-        let cart = []; // Array to store cart items: { product: product_object, quantity: number }
-        let currentLoggedInCustomerCode = null; // Stores the code of the customer who logged in
+        let products = []; 
+        let cart = []; 
+        let currentLoggedInCustomerCode = null; 
 
         // For Container Type dropdown
         const LOCAL_STORAGE_CONTAINER_TYPES_KEY = 'gic_container_types';
         let containerTypes = ['Glass', 'PET', 'Tetra', 'Bag', 'Other']; // Default types
+
+        // For Request Access Addresses
+        let requestAddresses = []; // Stores { address: string, isPreferable: boolean }
+
 
         // DOM Elements
         const productGrid = document.getElementById('productGrid');
@@ -454,12 +549,12 @@
         const newProductNameInput = document.getElementById('newProductName');
         const newProductDescriptionInput = document.getElementById('newProductDescription');
         const newProductCategoryInput = document.getElementById('newProductCategory'); 
-        const newProductSKUInput = document.getElementById('newProductSKU'); // SKU is now required
-        const newProductTiHiInput = document.getElementById('newProductTiHi'); // New TiHi field
-        const newProductCaseWeightInput = document.getElementById('newProductCaseWeight'); // New Case Weight field
-        const newProductContainerTypeInput = document.getElementById('newProductContainerType'); // New Container Type dropdown
-        const addNewContainerTypeBtn = document.getElementById('addNewContainerTypeBtn'); // Button for new container type
-        const newProductPriceInput = document.getElementById('newProductPrice'); // Internal price field
+        const newProductSKUInput = document.getElementById('newProductSKU'); 
+        const newProductTiHiInput = document.getElementById('newProductTiHi'); 
+        const newProductCaseWeightInput = document.getElementById('newProductCaseWeight'); 
+        const newProductContainerTypeInput = document.getElementById('newProductContainerType'); 
+        const addNewContainerTypeBtn = document.getElementById('addNewContainerTypeBtn'); 
+        const newProductPriceInput = document.getElementById('newProductPrice'); 
         const addProductMessage = document.getElementById('addProductMessage');
         const discardProductBtn = document.getElementById('discardProductBtn'); 
 
@@ -477,13 +572,30 @@
         const quantityAddBtn = document.getElementById('quantityAddBtn');
         const quantityCancelBtn = document.getElementById('quantityCancelBtn');
         const quantityError = document.getElementById('quantityError');
-        let currentProductIdForQuantity = null; // To store which product is being processed
+        let currentProductIdForQuantity = null; 
 
         // Message Modal Elements
         const messageModal = document.getElementById('messageModal');
         const messageTitle = document.getElementById('messageTitle');
         const messageText = document.getElementById('messageText');
         const messageCloseBtn = document.getElementById('messageCloseBtn');
+
+        // Request Access Modal Elements
+        const requestAccessLink = document.getElementById('requestAccessLink');
+        const requestAccessModal = document.getElementById('requestAccessModal');
+        const requestAccessForm = document.getElementById('requestAccessForm');
+        const reqCustomerNameInput = document.getElementById('reqCustomerName');
+        const reqContactNameInput = document.getElementById('reqContactName');
+        const reqPhoneInput = document.getElementById('reqPhone');
+        const reqEmailInput = document.getElementById('reqEmail');
+        const reqPickupOption = document.getElementById('reqPickupOption');
+        const deliveryAddressesContainer = document.getElementById('deliveryAddressesContainer');
+        const newDeliveryAddressInput = document.getElementById('newDeliveryAddress');
+        const addAddressBtn = document.getElementById('addAddressBtn');
+        const addressError = document.getElementById('addressError');
+        const requestAccessMessage = document.getElementById('requestAccessMessage');
+        const cancelRequestAccessBtn = document.getElementById('cancelRequestAccessBtn');
+
 
         const ADMIN_PASSWORD = "281920";
         let isAdminLoggedIn = false;
@@ -518,8 +630,8 @@
                 const productsRef = getProductsCollection();
                 const querySnapshot = await getDocs(productsRef);
                 products = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                products.sort((a, b) => a.name.localeCompare(b.name)); // Keep sorted
-                applyFiltersAndSearch(); // Render products after loading
+                products.sort((a, b) => a.name.localeCompare(b.name)); 
+                applyFiltersAndSearch(); 
                 console.log("Products loaded from Firestore.");
             } catch (error) {
                 console.error("Error loading products from Firestore:", error);
@@ -538,12 +650,16 @@
             const productsToDisplay = products.filter(product => {
                 const matchesSearch = product.name.toLowerCase().includes(searchTerm) ||
                                       product.description.toLowerCase().includes(searchTerm) ||
-                                      (product.category && product.category.toLowerCase().includes(searchTerm));
+                                      (product.category && product.category.toLowerCase().includes(searchTerm)) ||
+                                      (product.sku && product.sku.toLowerCase().includes(searchTerm)) ||
+                                      (product.tiHi && product.tiHi.toLowerCase().includes(searchTerm)) ||
+                                      (product.containerType && product.containerType.toLowerCase().includes(searchTerm));
+                                      
                 const matchesCategory = selectedCategory === "All" || (product.category && product.category === selectedCategory);
                 return matchesSearch && matchesCategory;
             });
 
-            productGrid.innerHTML = ''; // Clear existing products
+            productGrid.innerHTML = ''; 
             if (productsToDisplay.length === 0) {
                 productGrid.innerHTML = '<p class="text-center text-gray-600 text-lg col-span-full">No products found matching your criteria.</p>';
                 return;
@@ -556,13 +672,12 @@
                 const containerTypeDisplay = product.containerType ? product.containerType : '';
 
                 const newDescription = [
-                    product.name || '',
                     product.category || '',
                     product.sku || '',
                     tiHiDisplay,
                     caseWeightDisplay,
                     containerTypeDisplay
-                ].filter(Boolean).join(' | '); // Filter(Boolean) removes empty strings
+                ].filter(Boolean).join(' | '); 
 
                 const productListItem = `
                     <div class="bg-white rounded-xl shadow-lg hover:shadow-xl transition-shadow duration-300 p-4 flex items-center justify-between">
@@ -578,7 +693,6 @@
                 productGrid.insertAdjacentHTML('beforeend', productListItem);
             });
 
-            // Add event listeners to "Add to Cart" buttons after they are rendered
             document.querySelectorAll('.add-to-cart-btn').forEach(button => {
                 button.addEventListener('click', (event) => {
                     const productId = event.target.dataset.productId;
@@ -603,35 +717,32 @@
                     cart.push({ product: product, quantity: quantity });
                 }
                 updateCartDisplay();
-                hideQuantityModal(); // Hide the quantity modal after adding
+                hideQuantityModal(); 
                 showMessageModal("Item Added", `${quantity} cases of ${product.name} added to cart!`);
             } else {
                 showMessageModal("Error", "Could not add item to cart. Invalid quantity.");
             }
         }
 
-        // Function to remove an item from the cart
         function removeFromCart(productId) {
             cart = cart.filter(item => item.product.id !== productId);
             updateCartDisplay();
         }
 
-        // Function to update cart item quantity
         function updateQuantity(productId, change) {
             const item = cart.find(item => item.product.id === productId);
             if (item) {
                 item.quantity += change;
                 if (item.quantity <= 0) {
-                    removeFromCart(productId); // Remove if quantity drops to 0 or less
+                    removeFromCart(productId); 
                 } else {
                     updateCartDisplay();
                 }
             }
         }
 
-        // Function to update the cart display (items, total, count)
         function updateCartDisplay() {
-            cartItemsContainer.innerHTML = ''; // Clear current cart items
+            cartItemsContainer.innerHTML = ''; 
             let itemCount = 0;
 
             if (cart.length === 0) {
@@ -661,7 +772,6 @@
 
             cartItemCount.textContent = itemCount;
 
-            // Re-add event listeners for quantity and remove buttons (since they are re-rendered)
             document.querySelectorAll('.quantity-btn').forEach(button => {
                 button.addEventListener('click', (event) => {
                     const productId = event.target.dataset.productId;
@@ -678,7 +788,6 @@
             });
         }
 
-        // Function to place an order
         async function placeOrder() {
             if (!currentLoggedInCustomerCode) {
                 showMessageModal("Error", "Please log in as a customer to place an order.");
@@ -699,24 +808,24 @@
                     productId: item.product.id,
                     name: item.product.name,
                     quantity: item.quantity,
-                    price: item.product.price // Keep price for order record
+                    price: item.product.price 
                 }));
                 const totalPrice = orderItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
                 const ordersRef = getOrdersCollection(currentLoggedInCustomerCode);
                 await addDoc(ordersRef, {
                     customerCode: currentLoggedInCustomerCode,
-                    orderDate: serverTimestamp(), // Firestore's server timestamp
+                    orderDate: serverTimestamp(), 
                     items: orderItems,
                     totalPrice: totalPrice,
                     status: "Pending"
                 });
 
-                cart = []; // Clear cart after placing order
+                cart = []; 
                 updateCartDisplay();
                 hideCartModal();
                 showMessageModal("Order Placed!", "Your order has been successfully placed. You can view it in 'My Orders'.");
-                loadPreviousOrders(); // Refresh orders list
+                loadPreviousOrders(); 
             } catch (error) {
                 console.error("Error placing order:", error);
                 showMessageModal("Order Error", "Failed to place order. Please try again.");
@@ -724,89 +833,71 @@
         }
 
 
-        // Function to show the cart modal
         function showCartModal() {
             cartModal.classList.remove('hidden');
-            // Animate by sliding in from the right
             setTimeout(() => {
                 cartContent.classList.remove('translate-x-full');
                 cartContent.classList.add('translate-x-0');
-            }, 10); // Small delay to allow 'hidden' to be removed first
+            }, 10); 
         }
 
-        // Function to hide the cart modal
         function hideCartModal() {
-            // Animate by sliding out to the right
             cartContent.classList.remove('translate-x-0');
             cartContent.classList.add('translate-x-full');
             setTimeout(() => {
                 cartModal.classList.add('hidden');
-            }, 300); // Match animation duration
+            }, 300); 
         }
 
-        // Function to show the quantity selection modal
         function showQuantityModal(productId, productName) {
             currentProductIdForQuantity = productId;
             quantityProductName.textContent = productName;
-            quantityInput.value = 1; // Default to 1 case
-            quantityError.classList.add('hidden'); // Hide any previous errors
-            quantityModal.classList.add('active'); // Shows modal and triggers transition
-            quantityInput.focus(); // Focus the input for immediate typing
+            quantityInput.value = 1; 
+            quantityError.classList.add('hidden'); 
+            quantityModal.classList.add('active'); 
+            quantityInput.focus(); 
         }
 
-        // Function to hide the quantity selection modal
         function hideQuantityModal() {
-            quantityModal.classList.remove('active'); // Hides modal and triggers transition
+            quantityModal.classList.remove('active'); 
             setTimeout(() => {
                 quantityModal.classList.add('hidden');
-                currentProductIdForQuantity = null; // Clear the stored product ID
-            }, 200); // Match transition duration
+                currentProductIdForQuantity = null; 
+            }, 200); 
         }
 
-        // Function to handle filtering and searching
         function applyFiltersAndSearch() {
-            renderProducts(); // Calling renderProducts without arguments will trigger filtering
+            renderProducts(); 
         }
 
-        /**
-         * Controls tab visibility.
-         * @param {HTMLElement} activeSection - The section to show.
-         * @param {HTMLElement} activeTabButton - The tab button to highlight.
-         */
         function switchTab(activeSection, activeTabButton) {
-            // Hide all sections
             customerLoginSection.classList.add('hidden');
             shopSection.classList.add('hidden');
             myOrdersSection.classList.add('hidden');
             adminSection.classList.add('hidden');
 
-            // Deactivate all tab buttons
             customerLoginTabButton.classList.remove('bg-blue-100');
             shopTabButton.classList.remove('bg-blue-100');
             myOrdersTabButton.classList.remove('bg-blue-100');
             adminTabButton.classList.remove('bg-blue-100');
 
-            // Show active section and highlight active tab
             activeSection.classList.remove('hidden');
             activeTabButton.classList.add('bg-blue-100');
         }
 
-        // Show Customer Login section initially
         function showLoginSection() {
             switchTab(customerLoginSection, customerLoginTabButton);
-            // Hide shop-related buttons for non-logged-in customers
             shopTabButton.classList.add('hidden');
             myOrdersTabButton.classList.add('hidden');
             cartButton.classList.add('hidden');
             customerLogoutButton.classList.add('hidden');
-            currentLoggedInCustomerCode = null; // Ensure customer is logged out logically
-            customerLoginMessage.classList.add('hidden'); // Hide any login messages
+            currentLoggedInCustomerCode = null; 
+            customerLoginMessage.classList.add('hidden'); 
             customerCodeInput.value = '';
             customerPasswordInput.value = '';
-            updateCartDisplay(); // Clear cart display on logout
+            updateCartDisplay(); 
         }
 
-        // Show Shop section (only if logged in as customer)
         function showShopSection() {
             if (!currentLoggedInCustomerCode) {
                 showMessageModal("Access Denied", "Please log in as a customer to access the shop.");
@@ -814,12 +905,11 @@
                 return;
             }
             switchTab(shopSection, shopTabButton);
-            productSearch.value = ''; // Clear search when switching tabs
-            categoryFilter.value = 'All'; // Reset category filter
-            applyFiltersAndSearch(); // Re-render all products with filters applied
+            productSearch.value = ''; 
+            categoryFilter.value = 'All'; 
+            applyFiltersAndSearch(); 
         }
 
-        // Show My Orders section (only if logged in as customer)
         async function showMyOrdersSection() {
             if (!currentLoggedInCustomerCode) {
                 showMessageModal("Access Denied", "Please log in as a customer to view your orders.");
@@ -830,23 +920,21 @@
             await loadPreviousOrders();
         }
 
-        // Show Admin section and handle authentication
         function showAdminSection() {
             switchTab(adminSection, adminTabButton);
 
             if (isAdminLoggedIn) {
                 adminAuth.classList.add('hidden');
                 adminContent.classList.remove('hidden');
-                showAdminProductSection(); // Default to showing product section after admin login
+                showAdminProductSection(); 
             } else {
                 adminAuth.classList.remove('hidden');
                 adminContent.classList.add('hidden');
-                adminAuthMessage.classList.add('hidden'); // Hide any previous error messages
-                adminPasswordInput.value = ''; // Clear password field
+                adminAuthMessage.classList.add('hidden'); 
+                adminPasswordInput.value = ''; 
             }
         }
 
-        // Admin Sub-Tab Functions
         function showAdminProductSection() {
             adminProductSection.classList.remove('hidden');
             adminCustomerSection.classList.add('hidden');
@@ -854,8 +942,9 @@
             adminProductsTabButton.classList.add('bg-blue-500', 'text-white');
             adminCustomersTabButton.classList.remove('bg-blue-500', 'text-white');
             adminCustomersTabButton.classList.add('bg-gray-200');
-            addProductMessage.classList.add('hidden'); // Hide messages when switching
-            addProductForm.reset(); // Clear form on tab switch
+            addProductMessage.classList.add('hidden'); 
+            addProductForm.reset(); 
+            populateContainerTypesDropdown(); 
         }
 
         function showAdminCustomerSection() {
@@ -865,19 +954,18 @@
             adminCustomersTabButton.classList.add('bg-blue-500', 'text-white');
             adminProductsTabButton.classList.remove('bg-blue-500', 'text-white');
             adminProductsTabButton.classList.add('bg-gray-200');
-            addCustomerMessage.classList.add('hidden'); // Hide messages when switching
-            addCustomerForm.reset(); // Clear form on tab switch
+            addCustomerMessage.classList.add('hidden'); 
+            addCustomerForm.reset(); 
         }
 
 
-        // Admin login check
         function checkAdminPassword() {
             if (adminPasswordInput.value === ADMIN_PASSWORD) {
                 isAdminLoggedIn = true;
                 adminAuthMessage.classList.add('hidden');
                 adminAuth.classList.add('hidden');
                 adminContent.classList.remove('hidden');
-                showAdminProductSection(); // Default to showing product section after admin login
+                showAdminProductSection(); 
             } else {
                 isAdminLoggedIn = false;
                 adminAuthMessage.classList.remove('hidden');
@@ -885,9 +973,6 @@
             }
         }
 
-        /**
-         * Handles customer login.
-         */
         async function handleCustomerLogin() {
             const code = customerCodeInput.value.trim();
             const password = customerPasswordInput.value.trim();
@@ -918,23 +1003,20 @@
                 const customerDoc = querySnapshot.docs[0];
                 const customerData = customerDoc.data();
 
-                // IMPORTANT: For a real app, passwords should be securely hashed and compared on a backend.
-                // This is simplified for a "simple" client-side example.
                 if (customerData.password === password) {
                     currentLoggedInCustomerCode = customerData.customerCode;
                     customerLoginMessage.classList.add('hidden');
                     customerCodeInput.value = '';
                     customerPasswordInput.value = '';
 
-                    // Show customer-specific tabs and buttons
                     shopTabButton.classList.remove('hidden');
                     myOrdersTabButton.classList.remove('hidden');
                     cartButton.classList.remove('hidden');
                     customerLogoutButton.classList.remove('hidden');
-                    customerLoginTabButton.classList.add('hidden'); // Hide customer login tab when logged in
+                    customerLoginTabButton.classList.add('hidden'); 
                     customerCodeDisplay.textContent = currentLoggedInCustomerCode;
 
-                    showShopSection(); // Redirect to shop after login
+                    showShopSection(); 
                     showMessageModal("Welcome!", `Logged in as ${customerData.name || customerData.customerCode}.`);
                 } else {
                     customerLoginMessage.textContent = "Invalid customer code or password.";
@@ -948,23 +1030,17 @@
             }
         }
 
-        /**
-         * Logs out the current customer.
-         */
         async function handleCustomerLogout() {
             currentLoggedInCustomerCode = null;
-            cart = []; // Clear cart on logout
+            cart = []; 
             updateCartDisplay();
             showMessageModal("Logged Out", "You have been successfully logged out.");
-            showLoginSection(); // Go back to login screen
+            showLoginSection(); 
         }
 
-        /**
-         * Loads previous orders for the current logged-in customer.
-         */
         async function loadPreviousOrders() {
-            ordersList.innerHTML = ''; // Clear existing orders
-            noOrdersMessage.classList.add('hidden'); // Hide message initially
+            ordersList.innerHTML = ''; 
+            noOrdersMessage.classList.add('hidden'); 
 
             if (!currentLoggedInCustomerCode) {
                 ordersList.innerHTML = '<p class="text-center text-gray-600 text-lg">Please log in to view orders.</p>';
@@ -978,7 +1054,6 @@
 
             try {
                 const ordersRef = getOrdersCollection(currentLoggedInCustomerCode);
-                // Use imported documentId function directly
                 const q = query(ordersRef); 
                 const querySnapshot = await getDocs(q);
 
@@ -1011,7 +1086,6 @@
                         ordersList.insertAdjacentHTML('beforeend', orderCard);
                     });
 
-                    // Add event listeners for duplicate order buttons
                     document.querySelectorAll('.duplicate-order-btn').forEach(button => {
                         button.addEventListener('click', (event) => {
                             const orderIdToDuplicate = event.target.dataset.orderId;
@@ -1025,10 +1099,6 @@
             }
         }
 
-        /**
-         * Duplicates a previous order's items into the current cart.
-         * @param {string} orderId - The ID of the order to duplicate.
-         */
         async function duplicateOrderToCart(orderId) {
             if (!currentLoggedInCustomerCode || !window.firebaseDb) {
                 showMessageModal("Error", "Not logged in or database not ready.");
@@ -1037,8 +1107,7 @@
 
             try {
                 const ordersRef = getOrdersCollection(currentLoggedInCustomerCode);
-                // Use imported documentId function directly in the query
-                const q = query(ordersRef, where(documentId(), '==', orderId));
+                const q = query(ordersRef, where(documentId(), '==', orderId)); 
                 const orderSnapshot = await getDocs(q);
                 
                 if (orderSnapshot.empty) {
@@ -1048,7 +1117,6 @@
 
                 const orderData = orderSnapshot.docs[0].data();
                 orderData.items.forEach(orderItem => {
-                    // Find the actual product object from our global 'products' list
                     const productInStore = products.find(p => p.id === orderItem.productId);
                     if (productInStore) {
                         const existingCartItem = cart.find(item => item.product.id === productInStore.id);
@@ -1063,14 +1131,13 @@
                 });
                 updateCartDisplay();
                 showMessageModal("Order Duplicated", `Items from order ${orderId} added to your cart.`);
-                showCartModal(); // Show the cart after duplicating
+                showCartModal(); 
             } catch (error) {
                 console.error("Error duplicating order:", error);
                 showMessageModal("Error", "Failed to duplicate order. Please try again.");
             }
         }
 
-        // Add new product function (Firestore integration)
         async function addNewProduct(event) {
             event.preventDefault();
 
@@ -1084,19 +1151,18 @@
             const name = newProductNameInput.value.trim();
             const description = newProductDescriptionInput.value.trim();
             const category = newProductCategoryInput.value; 
-            const sku = newProductSKUInput.value.trim(); // SKU is now required
-            const tiHi = newProductTiHiInput.value.trim(); // New TiHi
-            const caseWeight = parseFloat(newProductCaseWeightInput.value); // New Case Weight
-            const containerType = newProductContainerTypeInput.value; // New Container Type
-            const price = parseFloat(newProductPriceInput.value); // Internal price field
+            const sku = newProductSKUInput.value.trim(); 
+            const tiHi = newProductTiHiInput.value.trim(); 
+            const caseWeight = parseFloat(newProductCaseWeightInput.value); 
+            const containerType = newProductContainerTypeInput.value; 
+            const price = parseFloat(newProductPriceInput.value); 
 
-            // Basic validation for new required fields
-            if (!name || !category || !sku || isNaN(price) || price < 0 || !containerType) {
+            if (!name || !category || !sku || !containerType || isNaN(price) || price < 0) {
                 addProductMessage.textContent = 'Please fill all required fields (Name, Category, SKU, Container Type) and ensure price is valid.';
                 addProductMessage.classList.remove('hidden');
                 addProductMessage.classList.remove('text-green-600'); 
                 addProductMessage.classList.add('text-red-500'); 
-                setTimeout(() => addProductMessage.classList.add('hidden'), 5000); // More time for longer message
+                setTimeout(() => addProductMessage.classList.add('hidden'), 5000); 
                 return;
             }
             if (isNaN(caseWeight) || caseWeight < 0) {
@@ -1108,10 +1174,8 @@
                 return;
             }
 
-
             try {
                 const productsRef = getProductsCollection();
-                // Generate a new ID or use a custom one if SKU can be ID
                 const newProductId = 'p' + (products.length > 0 ? (Math.max(...products.map(p => parseInt(p.id.substring(1)))) + 1) : 1);
 
                 const productData = {
@@ -1119,15 +1183,15 @@
                     name: name,
                     description: description,
                     category: category, 
-                    sku: sku, // Included required SKU
-                    tiHi: tiHi, // Included TiHi
-                    caseWeight: caseWeight, // Included Case Weight
-                    containerType: containerType, // Included Container Type
+                    sku: sku, 
+                    tiHi: tiHi, 
+                    caseWeight: caseWeight, 
+                    containerType: containerType, 
                     price: price, 
                 };
-                await setDoc(doc(productsRef, newProductId), productData); // Use setDoc with custom ID
+                await setDoc(doc(productsRef, newProductId), productData); 
 
-                await loadProductsFromFirestore(); // Reload products to update the shop view
+                await loadProductsFromFirestore(); 
                 
                 addProductForm.reset();
                 addProductMessage.textContent = 'Product added successfully!';
@@ -1145,7 +1209,6 @@
             }
         }
 
-        // Add new customer function (Firestore integration)
         async function addNewCustomer(event) {
             event.preventDefault();
 
@@ -1158,7 +1221,7 @@
 
             const name = newCustomerNameInput.value.trim();
             const code = newCustomerCodeInput.value.trim();
-            const password = newCustomerPasswordInput.value.trim(); // Storing plaintext for simplicity, NOT for production
+            const password = newCustomerPasswordInput.value.trim(); 
 
             if (!name || !code || !password) {
                 addCustomerMessage.textContent = 'Please fill all customer fields.';
@@ -1171,7 +1234,6 @@
 
             try {
                 const customersRef = getCustomersCollection();
-                // Check if customer code already exists
                 const q = query(customersRef, where("customerCode", "==", code));
                 const querySnapshot = await getDocs(q);
                 if (!querySnapshot.empty) {
@@ -1186,7 +1248,7 @@
                 await addDoc(customersRef, {
                     name: name,
                     customerCode: code,
-                    password: password // IMPORTANT: In production, HASH this password securely!
+                    password: password 
                 });
                 
                 addCustomerForm.reset();
@@ -1204,8 +1266,6 @@
                 setTimeout(() => addCustomerMessage.classList.add('hidden'), 3000);
             }
         }
-
-        // --- Container Type Management Functions ---
 
         /**
          * Loads container types from local storage or uses default.
@@ -1230,9 +1290,8 @@
          * @param {string} selectedValue - The value to mark as selected (optional).
          */
         function populateContainerTypesDropdown(selectedValue = '') {
-            newProductContainerTypeInput.innerHTML = ''; // Clear existing options
+            newProductContainerTypeInput.innerHTML = ''; 
 
-            // Add default "Select a type" option if no value is pre-selected
             if (!selectedValue) {
                 const defaultOption = document.createElement('option');
                 defaultOption.value = "";
@@ -1253,23 +1312,190 @@
             });
         }
 
-        /**
-         * Handles adding a new container type via prompt.
-         */
         function handleAddNewContainerType() {
             const newType = prompt("Enter new container type (e.g., 'Cans', 'Bottles'):");
             if (newType && newType.trim() !== '') {
                 const trimmedType = newType.trim();
                 if (!containerTypes.includes(trimmedType)) {
                     containerTypes.push(trimmedType);
-                    containerTypes.sort(); // Keep sorted alphabetically
+                    containerTypes.sort(); 
                     saveContainerTypes();
-                    populateContainerTypesDropdown(trimmedType); // Re-populate and select new type
+                    populateContainerTypesDropdown(trimmedType); 
                     showMessageModal("Success", `"${trimmedType}" added to container types.`);
                 } else {
                     showMessageModal("Info", `"${trimmedType}" already exists in container types.`);
                 }
             }
+        }
+
+        // --- Request Access Modal Functions ---
+        
+        /**
+         * Shows the request access modal.
+         */
+        function showRequestAccessModal() {
+            requestAccessModal.classList.add('active');
+            requestAccessForm.reset(); // Clear form on open
+            requestAddresses = []; // Clear addresses on open
+            renderDeliveryAddresses();
+            reqPickupOption.checked = false; // Reset pickup option
+            toggleAddressRequired(); // Update required state
+            requestAccessMessage.classList.add('hidden'); // Hide any messages
+        }
+
+        /**
+         * Hides the request access modal.
+         */
+        function hideRequestAccessModal() {
+            requestAccessModal.classList.remove('active');
+        }
+
+        /**
+         * Adds a new delivery address to the requestAddresses array.
+         */
+        function addDeliveryAddress() {
+            const address = newDeliveryAddressInput.value.trim();
+            if (address) {
+                // If this is the first address and pickup is not selected, make it preferable
+                const isPreferable = requestAddresses.length === 0 && !reqPickupOption.checked;
+                requestAddresses.push({ address: address, isPreferable: isPreferable });
+                newDeliveryAddressInput.value = ''; // Clear input
+                addressError.classList.add('hidden'); // Hide any previous error
+                renderDeliveryAddresses();
+                toggleAddressRequired(); // Update required state
+            } else {
+                addressError.textContent = "Please enter an address.";
+                addressError.classList.remove('hidden');
+            }
+        }
+
+        /**
+         * Renders the list of delivery addresses.
+         */
+        function renderDeliveryAddresses() {
+            deliveryAddressesContainer.innerHTML = '';
+            if (requestAddresses.length === 0) {
+                deliveryAddressesContainer.innerHTML = '<p class="text-gray-500 text-sm italic">No delivery addresses added.</p>';
+            }
+            requestAddresses.forEach((addr, index) => {
+                const addressItem = `
+                    <div class="flex items-center space-x-2 bg-white p-2 rounded-md border border-gray-200">
+                        <input type="radio" name="preferableAddress" id="addr-${index}" data-index="${index}" ${addr.isPreferable ? 'checked' : ''} class="form-radio h-4 w-4 text-blue-600">
+                        <label for="addr-${index}" class="flex-grow text-sm text-gray-800 break-words">${addr.address}</label>
+                        <button type="button" class="remove-address-btn text-red-500 hover:text-red-700 text-lg" data-index="${index}">&times;</button>
+                    </div>
+                `;
+                deliveryAddressesContainer.insertAdjacentHTML('beforeend', addressItem);
+            });
+
+            // Add event listeners for new radio buttons and remove buttons
+            document.querySelectorAll('input[name="preferableAddress"]').forEach(radio => {
+                radio.addEventListener('change', (event) => {
+                    const selectedIndex = parseInt(event.target.dataset.index);
+                    requestAddresses.forEach((addr, i) => {
+                        addr.isPreferable = (i === selectedIndex);
+                    });
+                    // Re-render to ensure visual update if needed, though radio buttons handle much of it
+                    // renderDeliveryAddresses(); // Might cause focus issues, so rely on native radio behavior
+                });
+            });
+
+            document.querySelectorAll('.remove-address-btn').forEach(button => {
+                button.addEventListener('click', (event) => {
+                    const indexToRemove = parseInt(event.target.dataset.index);
+                    removeDeliveryAddress(indexToRemove);
+                });
+            });
+        }
+
+        /**
+         * Removes a delivery address by index.
+         * @param {number} index - The index of the address to remove.
+         */
+        function removeDeliveryAddress(index) {
+            const wasPreferable = requestAddresses[index].isPreferable;
+            requestAddresses.splice(index, 1);
+            // If the removed address was preferable and there are other addresses, set the first one as preferable
+            if (wasPreferable && requestAddresses.length > 0) {
+                requestAddresses[0].isPreferable = true;
+            }
+            renderDeliveryAddresses();
+            toggleAddressRequired(); // Update required state
+        }
+
+        /**
+         * Toggles the required state of address fields based on pickup option.
+         */
+        function toggleAddressRequired() {
+            const isPickupSelected = reqPickupOption.checked;
+            const hasDeliveryAddress = requestAddresses.length > 0;
+
+            // Address fields are 'required' only if not pickup AND no addresses added
+            // The logic for requiring 'at least one' address is handled in submitRequestAccess
+            newDeliveryAddressInput.required = !isPickupSelected && !hasDeliveryAddress;
+            // The prompt/visual for adding an address should still be there, but submission validates
+        }
+
+        /**
+         * Handles submission of the request access form.
+         */
+        async function submitRequestAccess(event) {
+            event.preventDefault();
+
+            const customerName = reqCustomerNameInput.value.trim();
+            const contactName = reqContactNameInput.value.trim();
+            const phone = reqPhoneInput.value.trim();
+            const email = reqEmailInput.value.trim();
+            const prefersPickup = reqPickupOption.checked;
+
+            // Basic validation
+            if (!customerName || !phone || !email) {
+                requestAccessMessage.textContent = "Please fill in Your Name, Phone, and Email.";
+                requestAccessMessage.classList.remove('hidden');
+                requestAccessMessage.classList.add('text-red-500');
+                return;
+            }
+
+            if (!prefersPickup && requestAddresses.length === 0) {
+                requestAccessMessage.textContent = "Please add at least one delivery address or select Pickup option.";
+                requestAccessMessage.classList.remove('hidden');
+                requestAccessMessage.classList.add('text-red-500');
+                return;
+            }
+            if (prefersPickup && requestAddresses.length > 0 && !confirm("You have entered delivery addresses but also selected 'Pickup'. Are you sure you want to proceed with 'Pickup' and disregard the addresses?")) {
+                return;
+            }
+
+
+            const requestData = {
+                customerName,
+                contactName: contactName || customerName, // Default contact to customer name if not provided
+                phone,
+                email,
+                prefersPickup,
+                deliveryAddresses: prefersPickup ? [] : requestAddresses, // Only include addresses if not pickup
+                timestamp: new Date().toLocaleString() // Client-side timestamp for display
+                // In a real app, you might add serverTimestamp() here if saving to Firestore
+            };
+
+            console.log("Access Request Submitted:", requestData);
+            // For a real app, you would send this to Firestore (e.g., addDoc(collection(db, 'accessRequests'), requestData))
+            // await addDoc(collection(window.firebaseDb, 'accessRequests'), requestData); // Example Firestore save
+
+            requestAccessForm.reset();
+            requestAddresses = []; // Clear addresses
+            renderDeliveryAddresses();
+            requestAccessMessage.textContent = "Your access request has been submitted successfully!";
+            requestAccessMessage.classList.remove('hidden');
+            requestAccessMessage.classList.remove('text-red-500');
+            requestAccessMessage.classList.add('text-green-600');
+            
+            // Optionally hide modal after a delay
+            setTimeout(() => {
+                hideRequestAccessModal();
+                requestAccessMessage.classList.add('hidden');
+            }, 3000);
+            showMessageModal("Request Sent!", "Your access request has been sent for review. We will contact you soon.");
         }
 
 
@@ -1303,31 +1529,27 @@
             }
         });
 
-        // Admin Sub-Tab Event Listeners
         adminProductsTabButton.addEventListener('click', showAdminProductSection);
         adminCustomersTabButton.addEventListener('click', showAdminCustomerSection);
 
 
         addProductForm.addEventListener('submit', addNewProduct);
-        addCustomerForm.addEventListener('submit', addNewCustomer); // New event listener for customer form
+        addCustomerForm.addEventListener('submit', addNewCustomer); 
 
-        // Discard Buttons Event Listeners
         discardProductBtn.addEventListener('click', () => {
             addProductForm.reset();
-            addProductMessage.classList.add('hidden'); // Hide messages
-            populateContainerTypesDropdown(); // Reset container type dropdown
+            addProductMessage.classList.add('hidden'); 
+            populateContainerTypesDropdown(); 
         });
 
         discardCustomerBtn.addEventListener('click', () => {
             addCustomerForm.reset();
-            addCustomerMessage.classList.add('hidden'); // Hide messages
+            addCustomerMessage.classList.add('hidden'); 
         });
 
-        // New container type button event listener
         addNewContainerTypeBtn.addEventListener('click', handleAddNewContainerType);
 
 
-        // Quantity Modal Event Listeners
         quantityAddBtn.addEventListener('click', () => {
             const quantity = parseInt(quantityInput.value);
             if (currentProductIdForQuantity && !isNaN(quantity) && quantity >= 1) {
@@ -1345,34 +1567,33 @@
         });
         quantityCancelBtn.addEventListener('click', hideQuantityModal);
 
-        // Message Modal Event Listener
         messageCloseBtn.addEventListener('click', hideMessageModal);
+
+        // Request Access Event Listeners
+        requestAccessLink.addEventListener('click', showRequestAccessModal);
+        cancelRequestAccessBtn.addEventListener('click', hideRequestAccessModal);
+        addAddressBtn.addEventListener('click', addDeliveryAddress);
+        newDeliveryAddressInput.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault(); // Prevent form submission
+                addAddressBtn.click();
+            }
+        });
+        requestAccessForm.addEventListener('submit', submitRequestAccess);
+        reqPickupOption.addEventListener('change', toggleAddressRequired);
 
 
         // Initialize the store
         document.addEventListener('DOMContentLoaded', async () => {
             // Seed initial products and customers (if Firebase is initialized)
-            if (window.firebaseApp) {
-                // IMPORTANT: Ensure anonymous sign-in is complete before seeding data.
-                // This ensures `request.auth` is not null for initial Firestore operations.
-                if (!window.firebaseAuth.currentUser) {
-                    try {
-                        await signInAnonymously(window.firebaseAuth);
-                        console.log("Anonymous sign-in confirmed before DOMContentLoaded operations.");
-                    } catch (error) {
-                        console.error("Failed to sign in anonymously on DOMContentLoaded:", error);
-                        showMessageModal("Error", "Failed to connect to authentication service. Some features may not work.");
-                    }
-                }
-                await seedInitialData(); // Call the combined seeding function
+            if (window.firebaseApp && firebaseConfig.apiKey !== "YOUR_API_KEY") { 
+                await seedInitialData(); 
             } else {
-                // Fallback if Firebase isn't configured, products remain hardcoded
-                console.warn("Firebase not fully initialized. Using hardcoded products. Persistence and customer features will not work.");
-                renderProducts();
+                console.error("Firebase is not properly configured. Data persistence and customer features will not work on this deployment.");
             }
-            loadContainerTypes(); // Load container types for the dropdown
-            showLoginSection(); // Start on the customer login section
-            updateCartDisplay(); // Initialize cart display
+            loadContainerTypes(); 
+            showLoginSection(); 
+            updateCartDisplay(); 
         });
     </script>
 </body>
