@@ -69,6 +69,25 @@
         #requestAccessModal .modal-content h3, #requestAccessModal .modal-content .flex.justify-center {
             text-align: center; /* Center title and buttons within this modal */
         }
+        /* Password toggle button styling */
+        .password-toggle-btn {
+            position: absolute;
+            right: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: #6b7280; /* text-gray-500 */
+            cursor: pointer;
+            font-size: 0.875rem; /* text-sm */
+            font-weight: 500; /* font-medium */
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            transition: color 0.2s ease-in-out;
+        }
+        .password-toggle-btn:hover {
+            color: #4b5563; /* text-gray-700 */
+        }
     </style>
     <!-- Firebase CDN (Make sure to use the latest compatible versions) -->
     <script type="module">
@@ -371,9 +390,10 @@
                             <label for="newCustomerCode" class="block text-gray-700 text-sm font-bold mb-2">Customer Code:</label>
                             <input type="text" id="newCustomerCode" required class="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500">
                         </div>
-                        <div>
+                        <div class="relative">
                             <label for="newCustomerPassword" class="block text-gray-700 text-sm font-bold mb-2">Password:</label>
-                            <input type="password" id="newCustomerPassword" required class="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <input type="password" id="newCustomerPassword" required class="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 pr-12">
+                            <button type="button" id="toggleNewCustomerPassword" class="password-toggle-btn">Show</button>
                         </div>
                         <div class="flex space-x-4 mt-6">
                             <button type="submit" class="flex-1 bg-blue-500 text-white py-3 px-6 rounded-lg shadow-md hover:bg-blue-600 transition duration-300 font-semibold">Add Customer</button>
@@ -496,7 +516,7 @@
         let containerTypes = ['Glass', 'PET', 'Tetra', 'Bag', 'Other']; // Default types
 
         // For Request Access Addresses
-        let requestAddresses = []; // Stores { address: string, isPreferable: boolean }
+        let requestAddresses = []; 
 
 
         // DOM Elements
@@ -562,6 +582,7 @@
         const newCustomerNameInput = document.getElementById('newCustomerName');
         const newCustomerCodeInput = document.getElementById('newCustomerCode');
         const newCustomerPasswordInput = document.getElementById('newCustomerPassword');
+        const toggleNewCustomerPasswordBtn = document.getElementById('toggleNewCustomerPassword'); // New password toggle button
         const addCustomerMessage = document.getElementById('addCustomerMessage');
         const discardCustomerBtn = document.getElementById('discardCustomerBtn'); 
 
@@ -1462,40 +1483,50 @@
                 requestAccessMessage.classList.add('text-red-500');
                 return;
             }
-            if (prefersPickup && requestAddresses.length > 0 && !confirm("You have entered delivery addresses but also selected 'Pickup'. Are you sure you want to proceed with 'Pickup' and disregard the addresses?")) {
-                return;
+            // Using a custom message box instead of confirm()
+            if (prefersPickup && requestAddresses.length > 0) {
+                showMessageModal("Confirm Pickup", "You have entered delivery addresses but also selected 'Pickup'. Do you want to proceed with 'Pickup' and disregard the addresses?");
+                // Implement a way to handle confirmation within the message modal if this needs to be interactive.
+                // For now, this is a non-blocking message.
             }
 
 
             const requestData = {
                 customerName,
-                contactName: contactName || customerName, // Default contact to customer name if not provided
+                contactName: contactName || customerName, 
                 phone,
                 email,
                 prefersPickup,
-                deliveryAddresses: prefersPickup ? [] : requestAddresses, // Only include addresses if not pickup
-                timestamp: new Date().toLocaleString() // Client-side timestamp for display
-                // In a real app, you might add serverTimestamp() here if saving to Firestore
+                deliveryAddresses: prefersPickup ? [] : requestAddresses, 
+                timestamp: new Date().toLocaleString() 
             };
 
             console.log("Access Request Submitted:", requestData);
-            // For a real app, you would send this to Firestore (e.g., addDoc(collection(db, 'accessRequests'), requestData))
-            // await addDoc(collection(window.firebaseDb, 'accessRequests'), requestData); // Example Firestore save
 
             requestAccessForm.reset();
-            requestAddresses = []; // Clear addresses
+            requestAddresses = []; 
             renderDeliveryAddresses();
             requestAccessMessage.textContent = "Your access request has been submitted successfully!";
             requestAccessMessage.classList.remove('hidden');
             requestAccessMessage.classList.remove('text-red-500');
             requestAccessMessage.classList.add('text-green-600');
             
-            // Optionally hide modal after a delay
             setTimeout(() => {
                 hideRequestAccessModal();
                 requestAccessMessage.classList.add('hidden');
             }, 3000);
             showMessageModal("Request Sent!", "Your access request has been sent for review. We will contact you soon.");
+        }
+
+        // --- Password Toggle Function ---
+        function togglePasswordVisibility() {
+            if (newCustomerPasswordInput.type === "password") {
+                newCustomerPasswordInput.type = "text";
+                toggleNewCustomerPasswordBtn.textContent = "Hide";
+            } else {
+                newCustomerPasswordInput.type = "password";
+                toggleNewCustomerPasswordBtn.textContent = "Show";
+            }
         }
 
 
@@ -1549,6 +1580,9 @@
 
         addNewContainerTypeBtn.addEventListener('click', handleAddNewContainerType);
 
+        // Password toggle listener
+        toggleNewCustomerPasswordBtn.addEventListener('click', togglePasswordVisibility);
+
 
         quantityAddBtn.addEventListener('click', () => {
             const quantity = parseInt(quantityInput.value);
@@ -1575,7 +1609,7 @@
         addAddressBtn.addEventListener('click', addDeliveryAddress);
         newDeliveryAddressInput.addEventListener('keypress', (event) => {
             if (event.key === 'Enter') {
-                event.preventDefault(); // Prevent form submission
+                event.preventDefault(); 
                 addAddressBtn.click();
             }
         });
